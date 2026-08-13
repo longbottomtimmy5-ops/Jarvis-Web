@@ -92,6 +92,19 @@
   button:disabled { opacity: 0.4; cursor: default; }
   #micBtn.active { color: var(--bg); background: var(--cyan); }
   #clapBtn.active { color: var(--bg); background: var(--amber); border-color: var(--amber); }
+
+  /* ---------- Robot simulator ---------- */
+  #simSection { border-top: 1px solid var(--cyan-dim); padding-top: 14px; }
+  #simHeader { font-size: 13px; font-weight: bold; letter-spacing: 1px; color: var(--cyan-dim); margin-bottom: 8px; }
+  #arena { width: 100%; max-width: 260px; display: block; margin: 0 auto; background: var(--panel); border-radius: 8px; }
+  #robot { transition: transform 0.4s ease; }
+  #simControls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; max-width: 260px; margin: 10px auto 0; }
+  #simControls button { padding: 8px 6px; font-size: 12px; }
+  #simControls button[data-action="FORWARD"] { grid-column: 2; }
+  #simControls button[data-action="LEFT"] { grid-column: 1; grid-row: 1; }
+  #simControls button[data-action="RIGHT"] { grid-column: 3; grid-row: 1; }
+  #simControls button[data-action="BACKWARD"] { grid-column: 2; }
+  #simControls button[data-action="STOP"] { grid-column: 1 / span 3; }
 </style>
 </head>
 <body>
@@ -116,6 +129,24 @@
       <button id="micBtn">🎤 SPEAK</button>
       <button id="clapBtn">👏 CLAP: ON</button>
     </div>
+
+    <div id="simSection">
+      <div id="simHeader">Robot simulator</div>
+      <svg id="arena" viewBox="0 0 300 300">
+        <rect x="2" y="2" width="296" height="296" rx="8" fill="none" stroke="var(--cyan-dim)" stroke-width="1"/>
+        <g id="robot" transform="translate(150,150) rotate(0)">
+          <rect x="-18" y="-14" width="36" height="28" rx="4" fill="var(--panel)" stroke="var(--cyan)" stroke-width="2"/>
+          <polygon points="18,-8 30,0 18,8" fill="var(--amber)"/>
+        </g>
+      </svg>
+      <div id="simControls">
+        <button data-action="LEFT">⟲ LEFT</button>
+        <button data-action="FORWARD">↑ FORWARD</button>
+        <button data-action="BACKWARD">↓ BACKWARD</button>
+        <button data-action="RIGHT">⟳ RIGHT</button>
+        <button data-action="STOP">■ STOP</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -125,9 +156,9 @@
   // https://console.groq.com/keys). Keep this file private - anyone
   // who opens it can see the key.
   // ------------------------------------------------------------------
-  const GROQ_API_KEY = "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";
+  const GROQ_API_KEY = "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";
   const MODEL = "llama-3.3-70b-versatile";
-  const SYSTEM_PROMPT = "You are JARVIS, a poised, dry-witted AI assistant. Keep answers concise, precise, and helpful, with a calm, slightly formal tone.";
+  const SYSTEM_PROMPT = "You are JARVIS, a poised, dry-witted AI assistant controlling a small simulated robot. Keep answers concise, precise, and helpful, with a calm, slightly formal tone. If the user asks you to move, drive, turn, or stop the robot, end your reply with exactly one tag on its own line: [ACTION:FORWARD], [ACTION:BACKWARD], [ACTION:LEFT], [ACTION:RIGHT], or [ACTION:STOP]. Only include a tag when a movement action was actually requested - never include one for ordinary questions.";
 
   const log = document.getElementById("log");
   const entry = document.getElementById("entry");
@@ -148,7 +179,7 @@
 
   async function askJarvis(text) {
     addMessage("You", text, "you");
-    if (!GROQ_API_KEY || GROQ_API_KEY === "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") {
+    if (!GROQ_API_KEY || GROQ_API_KEY === "PASTE_YOUR_GROQ_API_KEY_HERE") {
       addMessage("SYSTEM", "No API key set yet. Open index.html and paste your Groq key in.", "sys");
       return;
     }
@@ -173,7 +204,12 @@
       if (!res.ok) {
         throw new Error((data.error && data.error.message) || res.statusText);
       }
-      const reply = data.choices[0].message.content.trim();
+      let reply = data.choices[0].message.content.trim();
+      const actionMatch = reply.match(/\[ACTION:(FORWARD|BACKWARD|LEFT|RIGHT|STOP)\]/i);
+      if (actionMatch) {
+        reply = reply.replace(actionMatch[0], "").trim();
+        moveRobot(actionMatch[1].toUpperCase());
+      }
       addMessage("J.A.R.V.I.S.", reply, "ai");
       speak(reply);
     } catch (err) {
@@ -238,6 +274,43 @@
   }
 
   addMessage("J.A.R.V.I.S.", "Online. All systems nominal. How can I help, sir?", "ai");
+
+  // ------------------------------------------------------------------
+  // Robot simulator: a small on-screen robot that responds to move
+  // commands. This is a stand-in for the real motors until you have
+  // the physical parts - the [ACTION:...] tags Jarvis outputs here are
+  // exactly what you'd later send to the ESP32 instead.
+  // ------------------------------------------------------------------
+  const robotEl = document.getElementById("robot");
+  const STEP = 40;
+  let robotX = 150, robotY = 150, robotAngle = 0;
+
+  function updateRobotTransform() {
+    robotEl.setAttribute("transform", `translate(${robotX},${robotY}) rotate(${robotAngle})`);
+  }
+
+  function moveRobot(action) {
+    const rad = (robotAngle * Math.PI) / 180;
+    if (action === "FORWARD") {
+      robotX += Math.cos(rad) * STEP;
+      robotY += Math.sin(rad) * STEP;
+    } else if (action === "BACKWARD") {
+      robotX -= Math.cos(rad) * STEP;
+      robotY -= Math.sin(rad) * STEP;
+    } else if (action === "LEFT") {
+      robotAngle -= 90;
+    } else if (action === "RIGHT") {
+      robotAngle += 90;
+    }
+    robotX = Math.min(280, Math.max(20, robotX));
+    robotY = Math.min(280, Math.max(20, robotY));
+    updateRobotTransform();
+  }
+
+  document.getElementById("simControls").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-action]");
+    if (btn) moveRobot(btn.dataset.action);
+  });
 
   // ------------------------------------------------------------------
   // Clap to activate: clap twice quickly and it starts listening,
