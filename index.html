@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>J.A.R.V.I.S.</title>
+<style>
+  :root {
+    --bg: #020a12;
+    --panel: #03121d;
+    --cyan: #4fe3ff;
+    --cyan-dim: #0f5c72;
+    --cyan-bright: #b6f7ff;
+    --amber: #ffb454;
+    --text: #c9f6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: "Consolas", "SF Mono", monospace;
+  }
+  body {
+    display: flex; flex-direction: column;
+  }
+  #app {
+    display: flex; flex: 1; min-height: 100vh;
+    flex-direction: row;
+  }
+  @media (max-width: 720px) {
+    #app { flex-direction: column; }
+  }
+
+  /* ---------- HUD ---------- */
+  #hud {
+    flex: 0 0 auto;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  #hud svg { width: 220px; height: 220px; max-width: 60vw; max-height: 60vw; }
+  .ring { fill: none; stroke-width: 2; opacity: 0.9; transform-origin: 100px 100px; }
+  .ring-outer { stroke: var(--cyan-dim); animation: spin 14s linear infinite; }
+  .ring-mid   { stroke: var(--cyan); animation: spin-rev 9s linear infinite; }
+  .ring-amber { stroke: var(--amber); stroke-width: 1.5; animation: spin 6s linear infinite; }
+  .ring-inner { stroke: var(--cyan-bright); stroke-width: 3; animation: spin-rev 4.5s linear infinite; }
+  .core { fill: var(--bg); stroke: var(--cyan-bright); stroke-width: 2; animation: pulse 2.4s ease-in-out infinite; transform-origin: 100px 100px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes spin-rev { to { transform: rotate(-360deg); } }
+  @keyframes pulse { 0%, 100% { r: 18; } 50% { r: 23; } }
+  @media (prefers-reduced-motion: reduce) {
+    .ring, .core { animation: none; }
+  }
+  #status {
+    margin-top: 14px; font-size: 13px; font-weight: bold; letter-spacing: 1px;
+    color: var(--cyan-dim);
+  }
+  #status.listening { color: var(--cyan); }
+
+  /* ---------- Chat panel ---------- */
+  #panel {
+    flex: 1; display: flex; flex-direction: column; min-width: 0;
+    padding: 20px; gap: 12px;
+  }
+  h1 {
+    font-size: 22px; font-weight: bold; color: var(--cyan-bright);
+    margin: 0 0 4px 0; letter-spacing: 1px;
+  }
+  #log {
+    flex: 1; overflow-y: auto; background: var(--panel);
+    border: 1px solid var(--cyan-dim); padding: 16px; font-size: 14px;
+    line-height: 1.6; min-height: 200px;
+  }
+  #log .who { font-weight: bold; }
+  #log .you { color: var(--amber); }
+  #log .ai { color: var(--cyan-bright); }
+  #log .sys { color: var(--cyan-dim); font-style: italic; }
+  #log p { margin: 0 0 14px 0; white-space: pre-wrap; }
+
+  #inputRow { display: flex; gap: 8px; flex-wrap: wrap; }
+  #entry {
+    flex: 1; min-width: 140px; background: var(--panel); color: var(--cyan-bright);
+    border: 1px solid var(--cyan-dim); padding: 10px 12px; font-size: 14px;
+    font-family: inherit;
+  }
+  #entry:focus { outline: 2px solid var(--cyan); }
+  button {
+    background: var(--panel); color: var(--cyan); border: 1px solid var(--cyan-dim);
+    padding: 10px 16px; font-family: inherit; font-weight: bold; font-size: 13px;
+    cursor: pointer;
+  }
+  button:hover, button:focus-visible { border-color: var(--cyan); color: var(--cyan-bright); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  #micBtn.active { color: var(--bg); background: var(--cyan); }
+  #clapBtn.active { color: var(--bg); background: var(--amber); border-color: var(--amber); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <svg viewBox="0 0 200 200">
+      <circle class="ring ring-outer" cx="100" cy="100" r="90"/>
+      <circle class="ring ring-mid"   cx="100" cy="100" r="70"/>
+      <circle class="ring ring-amber" cx="100" cy="100" r="52" stroke-dasharray="60 200"/>
+      <circle class="ring ring-inner" cx="100" cy="100" r="34" stroke-dasharray="80 140"/>
+      <circle class="core" cx="100" cy="100" r="18"/>
+    </svg>
+    <div id="status">STANDBY</div>
+  </div>
+
+  <div id="panel">
+    <h1>J.A.R.V.I.S.</h1>
+    <div id="log"></div>
+    <div id="inputRow">
+      <input id="entry" type="text" placeholder="Ask me anything..." autocomplete="off">
+      <button id="sendBtn">SEND</button>
+      <button id="micBtn">🎤 SPEAK</button>
+      <button id="clapBtn">👏 CLAP: ON</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ------------------------------------------------------------------
+  // SETUP: paste your free Groq API key below (get one at
+  // https://console.groq.com/keys). Keep this file private - anyone
+  // who opens it can see the key.
+  // ------------------------------------------------------------------
+  const GROQ_API_KEY = "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";
+  const MODEL = "llama-3.3-70b-versatile";
+  const SYSTEM_PROMPT = "You are JARVIS, a poised, dry-witted AI assistant. Keep answers concise, precise, and helpful, with a calm, slightly formal tone.";
+
+  const log = document.getElementById("log");
+  const entry = document.getElementById("entry");
+  const sendBtn = document.getElementById("sendBtn");
+  const micBtn = document.getElementById("micBtn");
+  const status = document.getElementById("status");
+
+  function addMessage(who, text, cls) {
+    const p = document.createElement("p");
+    const label = document.createElement("span");
+    label.className = "who " + cls;
+    label.textContent = who + ": ";
+    p.appendChild(label);
+    p.appendChild(document.createTextNode(text));
+    log.appendChild(p);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function askJarvis(text) {
+    addMessage("You", text, "you");
+    if (!GROQ_API_KEY || GROQ_API_KEY === "PASTE_YOUR_GROQ_API_KEY_HERE") {
+      addMessage("SYSTEM", "No API key set yet. Open index.html and paste your Groq key in.", "sys");
+      return;
+    }
+    sendBtn.disabled = true;
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + GROQ_API_KEY,
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: 600,
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: text },
+          ],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error((data.error && data.error.message) || res.statusText);
+      }
+      const reply = data.choices[0].message.content.trim();
+      addMessage("J.A.R.V.I.S.", reply, "ai");
+      speak(reply);
+    } catch (err) {
+      addMessage("SYSTEM", "Error contacting model: " + err.message, "sys");
+    } finally {
+      sendBtn.disabled = false;
+    }
+  }
+
+  function speak(text) {
+    if (!("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    window.speechSynthesis.speak(utter);
+  }
+
+  sendBtn.addEventListener("click", () => {
+    const text = entry.value.trim();
+    if (!text) return;
+    entry.value = "";
+    askJarvis(text);
+  });
+  entry.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendBtn.click();
+  });
+
+  // ------------------------------------------------------------------
+  // Voice input (Web Speech API) - works in Chrome/Edge/most Android
+  // browsers. Not supported in Safari/iOS.
+  // ------------------------------------------------------------------
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition;
+  if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+      status.textContent = "LISTENING...";
+      status.classList.add("listening");
+      micBtn.classList.add("active");
+      listeningNow = true;
+    };
+    recognition.onend = () => {
+      status.textContent = "STANDBY";
+      status.classList.remove("listening");
+      micBtn.classList.remove("active");
+      listeningNow = false;
+    };
+    recognition.onerror = (e) => {
+      addMessage("SYSTEM", "Could not understand audio (" + e.error + ")", "sys");
+    };
+    recognition.onresult = (e) => {
+      const transcript = e.results[0][0].transcript;
+      askJarvis(transcript);
+    };
+
+    micBtn.addEventListener("click", () => recognition.start());
+  } else {
+    micBtn.disabled = true;
+    micBtn.title = "Voice input isn't supported in this browser";
+  }
+
+  addMessage("J.A.R.V.I.S.", "Online. All systems nominal. How can I help, sir?", "ai");
+
+  // ------------------------------------------------------------------
+  // Clap to activate: clap twice quickly and it starts listening,
+  // same as the desktop app. Uses the browser's built-in microphone
+  // analysis (no installs needed). Requires https:// or localhost.
+  // ------------------------------------------------------------------
+  const clapBtn = document.getElementById("clapBtn");
+  let clapActive = true;
+  let clapAvailable = false;
+  let listeningNow = false;
+
+  clapBtn.addEventListener("click", () => {
+    clapActive = !clapActive;
+    clapBtn.textContent = "👏 CLAP: " + (clapActive ? "ON" : "OFF");
+    clapBtn.classList.toggle("active", clapActive);
+  });
+
+  async function startClapDetection() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new AudioCtx();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.fftSize);
+
+      clapAvailable = true;
+      clapBtn.classList.add("active");
+
+      let baseline = 6;
+      let clapTimes = [];
+      let lastTrigger = 0;
+
+      function tick() {
+        try {
+          analyser.getByteTimeDomainData(data);
+          let sum = 0;
+          for (let i = 0; i < data.length; i++) {
+            const v = data[i] - 128;
+            sum += v * v;
+          }
+          const rms = Math.sqrt(sum / data.length);
+          baseline = baseline * 0.97 + rms * 0.03;
+          const now = performance.now();
+
+          if (clapActive && !listeningNow && rms > Math.max(baseline * 3.5, 18)) {
+            if (!clapTimes.length || now - clapTimes[clapTimes.length - 1] > 150) {
+              clapTimes = clapTimes.filter(t => now - t < 1200);
+              clapTimes.push(now);
+              if (clapTimes.length >= 2 && now - lastTrigger > 2000) {
+                lastTrigger = now;
+                clapTimes = [];
+                addMessage("SYSTEM", "👏 Clap detected — listening…", "sys");
+                try {
+                  if (SpeechRecognition) recognition.start();
+                } catch (err) {
+                  addMessage("SYSTEM", "Couldn't start listening (" + err.message + "). Try the SPEAK button instead.", "sys");
+                }
+              }
+            }
+          }
+        } catch (err) {
+          // never let a stray error kill the clap listener
+        }
+        requestAnimationFrame(tick);
+      }
+      tick();
+    } catch (err) {
+      clapBtn.disabled = true;
+      clapBtn.title = "Microphone access unavailable for clap detection";
+    }
+  }
+
+  if (SpeechRecognition) startClapDetection();
+  else { clapBtn.disabled = true; clapBtn.title = "Needs voice input support"; }
+</script>
+</body>
+</html>
