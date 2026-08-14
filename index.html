@@ -105,6 +105,10 @@
   #simControls button[data-action="RIGHT"] { grid-column: 3; grid-row: 1; }
   #simControls button[data-action="BACKWARD"] { grid-column: 2; }
   #simControls button[data-action="STOP"] { grid-column: 1 / span 3; }
+  #robotIpRow { display: flex; gap: 6px; max-width: 260px; margin: 12px auto 0; }
+  #robotIpRow input { flex: 1; min-width: 0; background: var(--panel); color: var(--cyan-bright); border: 1px solid var(--cyan-dim); padding: 8px 10px; font-size: 12px; font-family: inherit; }
+  #robotIpRow button { padding: 8px 10px; font-size: 11px; }
+  #robotIpStatus { text-align: center; font-size: 11px; color: var(--cyan-dim); margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -146,6 +150,11 @@
         <button data-action="RIGHT">⟳ RIGHT</button>
         <button data-action="STOP">■ STOP</button>
       </div>
+      <div id="robotIpRow">
+        <input id="robotIpInput" type="text" placeholder="Robot IP (e.g. 192.168.1.42)" autocomplete="off">
+        <button id="saveIpBtn">SAVE</button>
+      </div>
+      <div id="robotIpStatus">No robot connected yet</div>
     </div>
   </div>
 </div>
@@ -285,6 +294,41 @@
   const STEP = 40;
   let robotX = 150, robotY = 150, robotAngle = 0;
 
+  // ------------------------------------------------------------------
+  // Real robot connection: once you have an ESP32 running the
+  // jarvis_robot.ino firmware, enter its IP address below and every
+  // command Jarvis gives will be sent to it automatically, alongside
+  // the on-screen simulation.
+  // ------------------------------------------------------------------
+  const robotIpInput = document.getElementById("robotIpInput");
+  const robotIpStatus = document.getElementById("robotIpStatus");
+  let robotIP = localStorage.getItem("jarvisRobotIP") || "";
+  robotIpInput.value = robotIP;
+  updateIpStatus();
+
+  function updateIpStatus() {
+    robotIpStatus.textContent = robotIP
+      ? "Connected to robot at " + robotIP + " (simulation only until real hardware)"
+      : "No robot connected yet - simulation only";
+  }
+
+  document.getElementById("saveIpBtn").addEventListener("click", () => {
+    robotIP = robotIpInput.value.trim();
+    localStorage.setItem("jarvisRobotIP", robotIP);
+    updateIpStatus();
+  });
+
+  async function sendToRobot(action) {
+    if (!robotIP) return;
+    try {
+      // mode: "no-cors" fires the request without needing to read the
+      // response - the ESP32 just needs to receive it.
+      await fetch(`http://${robotIP}/action?cmd=${action}`, { mode: "no-cors" });
+    } catch (err) {
+      addMessage("SYSTEM", "Couldn't reach robot at " + robotIP + " (" + err.message + ")", "sys");
+    }
+  }
+
   function updateRobotTransform() {
     robotEl.setAttribute("transform", `translate(${robotX},${robotY}) rotate(${robotAngle})`);
   }
@@ -305,6 +349,7 @@
     robotX = Math.min(280, Math.max(20, robotX));
     robotY = Math.min(280, Math.max(20, robotY));
     updateRobotTransform();
+    sendToRobot(action);
   }
 
   document.getElementById("simControls").addEventListener("click", (e) => {
