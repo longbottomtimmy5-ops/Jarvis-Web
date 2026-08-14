@@ -105,6 +105,8 @@
   #simControls button[data-action="RIGHT"] { grid-column: 3; grid-row: 1; }
   #simControls button[data-action="BACKWARD"] { grid-column: 2; }
   #simControls button[data-action="STOP"] { grid-column: 1 / span 3; }
+  #clearTrailBtn { grid-column: 1 / span 3; font-size: 11px; color: var(--cyan-dim); }
+  .trail-seg { stroke: var(--amber); stroke-width: 2; stroke-linecap: round; opacity: 0.6; }
   #robotIpRow { display: flex; gap: 6px; max-width: 260px; margin: 12px auto 0; }
   #robotIpRow input { flex: 1; min-width: 0; background: var(--panel); color: var(--cyan-bright); border: 1px solid var(--cyan-dim); padding: 8px 10px; font-size: 12px; font-family: inherit; }
   #robotIpRow button { padding: 8px 10px; font-size: 11px; }
@@ -138,6 +140,7 @@
       <div id="simHeader">Robot simulator</div>
       <svg id="arena" viewBox="0 0 300 300">
         <rect x="2" y="2" width="296" height="296" rx="8" fill="none" stroke="var(--cyan-dim)" stroke-width="1"/>
+        <g id="trail"></g>
         <g id="robot" transform="translate(150,150) rotate(0)">
           <rect x="-18" y="-14" width="36" height="28" rx="4" fill="var(--panel)" stroke="var(--cyan)" stroke-width="2"/>
           <polygon points="18,-8 30,0 18,8" fill="var(--amber)"/>
@@ -149,6 +152,7 @@
         <button data-action="BACKWARD">↓ BACKWARD</button>
         <button data-action="RIGHT">⟳ RIGHT</button>
         <button data-action="STOP">■ STOP</button>
+        <button id="clearTrailBtn">✕ CLEAR TRAIL</button>
       </div>
       <div id="robotIpRow">
         <input id="robotIpInput" type="text" placeholder="Robot IP (e.g. 192.168.1.42)" autocomplete="off">
@@ -291,8 +295,13 @@
   // exactly what you'd later send to the ESP32 instead.
   // ------------------------------------------------------------------
   const robotEl = document.getElementById("robot");
+  const trailEl = document.getElementById("trail");
   const STEP = 40;
   let robotX = 150, robotY = 150, robotAngle = 0;
+
+  document.getElementById("clearTrailBtn").addEventListener("click", () => {
+    trailEl.innerHTML = "";
+  });
 
   // ------------------------------------------------------------------
   // Real robot connection: once you have an ESP32 running the
@@ -334,6 +343,7 @@
   }
 
   function moveRobot(action) {
+    const oldX = robotX, oldY = robotY;
     const rad = (robotAngle * Math.PI) / 180;
     if (action === "FORWARD") {
       robotX += Math.cos(rad) * STEP;
@@ -348,6 +358,17 @@
     }
     robotX = Math.min(280, Math.max(20, robotX));
     robotY = Math.min(280, Math.max(20, robotY));
+
+    if (robotX !== oldX || robotY !== oldY) {
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", oldX);
+      line.setAttribute("y1", oldY);
+      line.setAttribute("x2", robotX);
+      line.setAttribute("y2", robotY);
+      line.setAttribute("class", "trail-seg");
+      trailEl.appendChild(line);
+    }
+
     updateRobotTransform();
     sendToRobot(action);
   }
