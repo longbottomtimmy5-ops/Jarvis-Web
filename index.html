@@ -190,12 +190,51 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  // ------------------------------------------------------------------
+  // Local command parser: handles simple, countable requests like
+  // "move forward 3 times" or "turn right twice" directly and
+  // reliably - the AI is good at conversation but not always
+  // consistent at outputting the exact right number of action tags,
+  // so we don't leave counting up to it when we can detect it here.
+  // ------------------------------------------------------------------
+  function parseLocalMove(text) {
+    const t = text.toLowerCase();
+    let direction = null;
+    if (/\bstop\b|\bhalt\b/.test(t)) direction = "STOP";
+    else if (/\bforward\b|\bahead\b|\bstraight\b/.test(t)) direction = "FORWARD";
+    else if (/\bback(ward)?\b|\breverse\b/.test(t)) direction = "BACKWARD";
+    else if (/\bleft\b/.test(t)) direction = "LEFT";
+    else if (/\bright\b/.test(t)) direction = "RIGHT";
+    if (!direction) return null;
+    if (direction === "STOP") return ["STOP"];
+    // Don't handle multi-clause requests locally (e.g. "turn right then
+    // go forward") - let the AI's own tags handle those instead.
+    const directionWords = (t.match(/\b(forward|ahead|straight|back(ward)?|reverse|left|right)\b/g) || []);
+    if (directionWords.length > 1) return null;
+
+    let count = 1;
+    const digitMatch = t.match(/(\d+)\s*(times|steps)?/);
+    const numberWords = { once: 1, twice: 2, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+    if (digitMatch) {
+      count = parseInt(digitMatch[1], 10);
+    } else {
+      for (const word in numberWords) {
+        if (new RegExp("\\b" + word + "\\b").test(t)) { count = numberWords[word]; break; }
+      }
+    }
+    count = Math.max(1, Math.min(count, 10));
+    return Array(count).fill(direction);
+  }
+
   async function askJarvis(text) {
     addMessage("You", text, "you");
     if (!GROQ_API_KEY || GROQ_API_KEY === "PASTE_YOUR_GROQ_API_KEY_HERE") {
       addMessage("SYSTEM", "No API key set yet. Open index.html and paste your Groq key in.", "sys");
       return;
     }
+    const localActions = parseLocalMove(text);
+    if (localActions) playActionQueue(localActions);
+
     sendBtn.disabled = true;
     try {
       const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -218,11 +257,10 @@
         throw new Error((data.error && data.error.message) || res.statusText);
       }
       let reply = data.choices[0].message.content.trim();
-      const actionMatches = [...reply.matchAll(/\[ACTION:(FORWARD|BACKWARD|LEFT|RIGHT|STOP)\]/gi)];
-      if (actionMatches.length) {
-        reply = reply.replace(/\[ACTION:(FORWARD|BACKWARD|LEFT|RIGHT|STOP)\]/gi, "").trim();
-        const actions = actionMatches.map(m => m[1].toUpperCase());
-        playActionQueue(actions);
+      const aiMatches = [...reply.matchAll(/\[ACTION:(FORWARD|BACKWARD|LEFT|RIGHT|STOP)\]/gi)];
+      reply = reply.replace(/\[ACTION:(FORWARD|BACKWARD|LEFT|RIGHT|STOP)\]/gi, "").trim();
+      if (!localActions && aiMatches.length) {
+        playActionQueue(aiMatches.map((m) => m[1].toUpperCase()));
       }
       addMessage("J.A.R.V.I.S.", reply, "ai");
       speak(reply);
