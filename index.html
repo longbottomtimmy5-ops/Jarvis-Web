@@ -171,7 +171,7 @@
   // ------------------------------------------------------------------
   const GROQ_API_KEY = "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";
   const MODEL = "llama-3.3-70b-versatile";
-  const SYSTEM_PROMPT = "You are JARVIS, a poised, dry-witted AI assistant controlling a small simulated robot. Keep answers concise, precise, and helpful, with a calm, slightly formal tone. If the user asks you to move, drive, turn, or stop the robot, end your reply with exactly one tag on its own line: [ACTION:FORWARD], [ACTION:BACKWARD], [ACTION:LEFT], [ACTION:RIGHT], or [ACTION:STOP]. Only include a tag when a movement action was actually requested - never include one for ordinary questions.";
+  const SYSTEM_PROMPT = "You are JARVIS, a poised, dry-witted AI assistant controlling a small simulated robot. Keep answers concise, precise, and helpful, with a calm, slightly formal tone. If the user asks you to move, drive, turn, or stop the robot, end your reply with one tag per step, in the order they should happen: [ACTION:FORWARD], [ACTION:BACKWARD], [ACTION:LEFT], [ACTION:RIGHT], or [ACTION:STOP]. For a request like 'go forward 3 times' output [ACTION:FORWARD][ACTION:FORWARD][ACTION:FORWARD]. For 'turn right then move forward twice' output [ACTION:RIGHT][ACTION:FORWARD][ACTION:FORWARD]. Include as many tags as needed, but only when a movement was actually requested - never for ordinary questions.";
 
   const log = document.getElementById("log");
   const entry = document.getElementById("entry");
@@ -218,10 +218,11 @@
         throw new Error((data.error && data.error.message) || res.statusText);
       }
       let reply = data.choices[0].message.content.trim();
-      const actionMatch = reply.match(/\[ACTION:(FORWARD|BACKWARD|LEFT|RIGHT|STOP)\]/i);
-      if (actionMatch) {
-        reply = reply.replace(actionMatch[0], "").trim();
-        moveRobot(actionMatch[1].toUpperCase());
+      const actionMatches = [...reply.matchAll(/\[ACTION:(FORWARD|BACKWARD|LEFT|RIGHT|STOP)\]/gi)];
+      if (actionMatches.length) {
+        reply = reply.replace(/\[ACTION:(FORWARD|BACKWARD|LEFT|RIGHT|STOP)\]/gi, "").trim();
+        const actions = actionMatches.map(m => m[1].toUpperCase());
+        playActionQueue(actions);
       }
       addMessage("J.A.R.V.I.S.", reply, "ai");
       speak(reply);
@@ -340,6 +341,16 @@
 
   function updateRobotTransform() {
     robotEl.setAttribute("transform", `translate(${robotX},${robotY}) rotate(${robotAngle})`);
+  }
+
+  // Plays a list of actions one at a time, with a short pause between
+  // each so you can actually watch every step happen (rather than all
+  // moves snapping into place instantly).
+  async function playActionQueue(actions) {
+    for (const action of actions) {
+      moveRobot(action);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   }
 
   function moveRobot(action) {
